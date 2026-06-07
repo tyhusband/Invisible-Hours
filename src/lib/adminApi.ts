@@ -65,6 +65,11 @@ async function adminApiError(res: Response): Promise<Error> {
       `${msg} — Redeploy the Edge Function with JWT verification off: supabase functions deploy admin-api --no-verify-jwt`,
     )
   }
+  if (res.status === 404) {
+    return new Error(
+      'Admin API not deployed. Run: npx supabase login && npx supabase link --project-ref bxrrtxynkeawzjrmcxda && npx supabase functions deploy admin-api --no-verify-jwt',
+    )
+  }
   return new Error(msg)
 }
 
