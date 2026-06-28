@@ -1,9 +1,11 @@
-import { memo, useRef, useCallback, useMemo } from 'react'
+import { memo, useRef, useCallback, useMemo, useEffect } from 'react'
 import { contrastColor, lighten } from '../../lib/categories'
 import { useCategoryStore } from '../../store/categoryStore'
 import { useCalendarStore } from '../../store/calendarStore'
 import type { GoogleCalendarSlotInfo } from '../../store/googleCalendarStore'
 import type { DisplaySegment } from '../../lib/slots'
+
+const TAP_MAX_MOVEMENT_PX = 14
 
 const CROSS_CURSOR = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cline x1='4' y1='4' x2='16' y2='16' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3Cline x1='16' y1='4' x2='4' y2='16' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3Cline x1='4' y1='4' x2='16' y2='16' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='16' y1='4' x2='4' y2='16' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") 10 10, crosshair`
 
@@ -29,7 +31,10 @@ interface SlotCellProps {
   onTouchEnd?: (dk: string, slotKey: string) => void
   onTouchCancel?: () => void
   onContextMenu: (e: React.MouseEvent, dk: string, slotKey: string) => void
-  onNoteClick: (e: React.MouseEvent, dk: string, slotKey: string) => void
+  editingNoteSlot: { dk: string; slotKey: string } | null
+  onStartNoteEdit: (dk: string, slotKey: string) => void
+  onEndNoteEdit: () => void
+  onSaveNote: (dk: string, slotKey: string, note: string) => void
 }
 
 const GROUP_RADIUS: Record<SlotGroupPosition, string> = {
@@ -75,7 +80,8 @@ function buildSegmentGradient(
 
 export const SlotCell = memo(function SlotCell({
   dk, slotKey, segments, googleEvent, isWeekView, isDragging, groupPosition, slotHeight,
-  onMouseDown, onMouseEnter, onTouchStart, onTouchEnd, onTouchCancel, onContextMenu, onNoteClick,
+  onMouseDown, onMouseEnter, onTouchStart, onTouchEnd, onTouchCancel, onContextMenu,
+  editingNoteSlot, onStartNoteEdit, onEndNoteEdit, onSaveNote,
 }: SlotCellProps) {
   const activeCategoryId = useCategoryStore((s) => s.activeCategoryId)
   const eraserOn = useCategoryStore((s) => s.eraserOn)
@@ -85,9 +91,17 @@ export const SlotCell = memo(function SlotCell({
   const firstFilled = segments.find((s) => s.categoryId !== null)
   const isFilled = !!firstFilled
   const primaryCatId = firstFilled?.categoryId ?? null
+  const noteBaseKey = firstFilled?.baseKey
 
   const slotData = useCalendarStore((s) => s.slotData)
-  const hasNote = isFilled && !!slotData[dk]?.[firstFilled.baseKey]?.note
+  const setNote = useCalendarStore((s) => s.setNote)
+  const note = noteBaseKey ? (slotData[dk]?.[noteBaseKey]?.note ?? '') : ''
+
+  const isEditingNote = !!(
+    noteBaseKey &&
+    editingNoteSlot?.dk === dk &&
+    editingNoteSlot?.slotKey === noteBaseKey
+  )
 
   const isMultiSegment = segments.length > 1
   const filledCount = segments.filter((s) => s.categoryId !== null).length
@@ -140,6 +154,32 @@ export const SlotCell = memo(function SlotCell({
 
   const swapColor = showSwap && activeCategoryId ? getCategoryColor(activeCategoryId) : undefined
   const swapOverlayRef = useRef<HTMLDivElement>(null)
+  const noteInputRef = useRef<HTMLInputElement>(null)
+
+  const touchStartPos = useRef({ x: 0, y: 0 })
+  const touchMaxMove = useRef(0)
+  const activeTouchId = useRef<number | null>(null)
+  const removeTouchListeners = useRef<(() => void) | null>(null)
+
+  const detachTouchListeners = useCallback(() => {
+    removeTouchListeners.current?.()
+    removeTouchListeners.current = null
+  }, [])
+
+  useEffect(() => () => detachTouchListeners(), [detachTouchListeners])
+
+  useEffect(() => {
+    if (!isEditingNote || !noteInputRef.current) return
+    noteInputRef.current.focus()
+    const len = noteInputRef.current.value.length
+    noteInputRef.current.setSelectionRange(len, len)
+  }, [isEditingNote])
+
+  const handleNoteChange = useCallback((value: string) => {
+    if (!noteBaseKey) return
+    setNote(dk, noteBaseKey, value)
+    onSaveNote(dk, noteBaseKey, value)
+  }, [dk, noteBaseKey, setNote, onSaveNote])
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!swapOverlayRef.current || !showSwap) return
@@ -150,7 +190,15 @@ export const SlotCell = memo(function SlotCell({
       `radial-gradient(circle at ${x}px ${y}px, ${swapColor}90 0%, transparent 50%)`
   }, [showSwap, swapColor])
 
-  const cursor = showCross ? CROSS_CURSOR : showSwap ? SWAP_CURSOR : showPlus ? PLUS_CURSOR : undefined
+  const cursor = showCross
+    ? CROSS_CURSOR
+    : showSwap
+      ? SWAP_CURSOR
+      : showPlus
+        ? PLUS_CURSOR
+        : showIdleHover
+          ? 'text'
+          : undefined
 
   const fillStyle = useMemo(() => {
     if (!isFilled) return undefined
@@ -159,6 +207,65 @@ export const SlotCell = memo(function SlotCell({
     }
     return { backgroundColor: color, color: textColor }
   }, [isFilled, gradientBg, color, textColor])
+
+  const labelClass = `${isWeekView ? 'text-[10px]' : 'text-xs'} font-medium relative z-10`
+  const showLabel = !groupPosition || groupPosition === 'solo' || groupPosition === 'first'
+
+  const handleIdleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (!isFilled || !noteBaseKey || isEditingNote) return
+    const t = e.touches[0]
+    detachTouchListeners()
+
+    touchStartPos.current = { x: t.clientX, y: t.clientY }
+    touchMaxMove.current = 0
+    activeTouchId.current = t.identifier
+
+    const onGlobalTouchMove = (ev: TouchEvent) => {
+      if (activeTouchId.current === null) return
+      let touch: Touch | undefined
+      for (let i = 0; i < ev.touches.length; i++) {
+        if (ev.touches[i].identifier === activeTouchId.current) {
+          touch = ev.touches[i]
+          break
+        }
+      }
+      if (!touch) return
+      const dx = touch.clientX - touchStartPos.current.x
+      const dy = touch.clientY - touchStartPos.current.y
+      const d = Math.hypot(dx, dy)
+      if (d > touchMaxMove.current) touchMaxMove.current = d
+    }
+
+    const onGlobalTouchEnd = (ev: TouchEvent) => {
+      if (activeTouchId.current === null) return
+      let ours = false
+      for (let i = 0; i < ev.changedTouches.length; i++) {
+        if (ev.changedTouches[i].identifier === activeTouchId.current) {
+          ours = true
+          break
+        }
+      }
+      if (!ours) return
+
+      const maxMove = touchMaxMove.current
+      detachTouchListeners()
+      activeTouchId.current = null
+
+      if (ev.type === 'touchcancel') return
+      if (maxMove <= TAP_MAX_MOVEMENT_PX) {
+        onStartNoteEdit(dk, noteBaseKey)
+      }
+    }
+
+    window.addEventListener('touchmove', onGlobalTouchMove, { passive: true })
+    window.addEventListener('touchend', onGlobalTouchEnd, true)
+    window.addEventListener('touchcancel', onGlobalTouchEnd, true)
+    removeTouchListeners.current = () => {
+      window.removeEventListener('touchmove', onGlobalTouchMove)
+      window.removeEventListener('touchend', onGlobalTouchEnd, true)
+      window.removeEventListener('touchcancel', onGlobalTouchEnd, true)
+    }
+  }, [isFilled, noteBaseKey, isEditingNote, dk, onStartNoteEdit, detachTouchListeners])
 
   return (
     <div
@@ -170,8 +277,9 @@ export const SlotCell = memo(function SlotCell({
       onMouseDown={(e) => {
         if (e.button === 2) return
         if (!activeCategoryId && !eraserOn) {
-          if (isFilled) {
-            onContextMenu(e, dk, slotKey)
+          if (isFilled && noteBaseKey) {
+            e.preventDefault()
+            onStartNoteEdit(dk, noteBaseKey)
           }
           return
         }
@@ -180,7 +288,10 @@ export const SlotCell = memo(function SlotCell({
       onMouseEnter={() => onMouseEnter(dk, slotKey)}
       onMouseMove={showSwap ? handleMouseMove : undefined}
       onTouchStart={(e) => {
-        if (!activeCategoryId && !eraserOn) return
+        if (!activeCategoryId && !eraserOn) {
+          handleIdleTouchStart(e)
+          return
+        }
         const t = e.touches[0]
         onTouchStart?.(dk, slotKey, t.clientX, t.clientY, t.identifier)
       }}
@@ -189,7 +300,11 @@ export const SlotCell = memo(function SlotCell({
         onTouchEnd?.(dk, slotKey)
       }}
       onTouchCancel={() => {
-        if (!activeCategoryId && !eraserOn) return
+        if (!activeCategoryId && !eraserOn) {
+          detachTouchListeners()
+          activeTouchId.current = null
+          return
+        }
         onTouchCancel?.()
       }}
       onContextMenu={(e) => {
@@ -207,17 +322,35 @@ export const SlotCell = memo(function SlotCell({
             }`}
             style={fillStyle}
           >
-            {(!groupPosition || groupPosition === 'solo' || groupPosition === 'first') && (
-              <span className={`${isWeekView ? 'text-[10px]' : 'text-xs'} font-medium truncate relative z-10`}>
-                {combinedLabel}
-              </span>
-            )}
-            {hasNote && (
-              <button
-                onClick={(e) => { e.stopPropagation(); onNoteClick(e, dk, slotKey) }}
-                className="absolute top-0.5 right-1 w-2 h-2 rounded-full opacity-70 hover:opacity-100 z-10"
-                style={{ backgroundColor: textColor }}
-              />
+            {showLabel && (
+              isEditingNote ? (
+                <span className={`flex items-center min-w-0 truncate ${labelClass}`}>
+                  <span className="flex-shrink-0">{combinedLabel}</span>
+                  <span className="opacity-70 mx-1 flex-shrink-0 font-normal">—</span>
+                  <input
+                    ref={noteInputRef}
+                    value={note}
+                    onChange={(e) => handleNoteChange(e.target.value)}
+                    onBlur={onEndNoteEdit}
+                    onKeyDown={(e) => { if (e.key === 'Escape') e.currentTarget.blur() }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    className={`flex-1 min-w-0 bg-transparent outline-none placeholder:opacity-50 ${isWeekView ? 'text-[10px]' : 'text-xs'} font-normal`}
+                    style={{ color: textColor }}
+                    placeholder="note"
+                  />
+                </span>
+              ) : (
+                <span className={`flex items-center min-w-0 truncate ${isWeekView ? 'text-[10px]' : 'text-xs'} relative z-10`}>
+                  <span className="font-medium flex-shrink-0">{combinedLabel}</span>
+                  {note && (
+                    <>
+                      <span className="opacity-70 mx-1 flex-shrink-0 font-normal">—</span>
+                      <span className="font-normal truncate">{note}</span>
+                    </>
+                  )}
+                </span>
+              )
             )}
             {showSwap && (
               <div

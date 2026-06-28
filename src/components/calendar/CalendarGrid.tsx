@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
-import { AnimatePresence } from 'motion/react'
 import { dateKey, getDisplaySlots, getDisplaySegments, type SlotGranularity } from '../../lib/slots'
 import { useCalendarStore } from '../../store/calendarStore'
 import { useUIStore } from '../../store/uiStore'
@@ -7,7 +6,6 @@ import { useGoogleCalendarStore } from '../../store/googleCalendarStore'
 import { mapEventsToSlots } from '../../lib/googleCalendarSlots'
 import { SlotCell } from './SlotCell'
 import { NowLine } from './NowLine'
-import { NotePopup } from './NotePopup'
 import { useDragPaint } from '../../hooks/useDragPaint'
 import type { SlotEntry } from '../../store/calendarStore'
 import { computeSlotGroupPositions } from '../../lib/slotGroups'
@@ -71,8 +69,8 @@ export function CalendarGrid({ onStrokeComplete, onSaveNote }: CalendarGridProps
     isDragging,
   } = useDragPaint(onStrokeComplete)
 
-  const [notePopup, setNotePopup] = useState<{
-    dk: string; slotKey: string; position: { x: number; y: number }
+  const [editingNoteSlot, setEditingNoteSlot] = useState<{
+    dk: string; slotKey: string
   } | null>(null)
 
   useEffect(() => {
@@ -102,8 +100,12 @@ export function CalendarGrid({ onStrokeComplete, onSaveNote }: CalendarGridProps
     setFocusedSlot({ dateKey: dk, slotKey })
   }, [setFocusedSlot])
 
-  const handleNoteClick = useCallback((e: React.MouseEvent, dk: string, slotKey: string) => {
-    setNotePopup({ dk, slotKey, position: { x: e.clientX, y: e.clientY } })
+  const startNoteEdit = useCallback((dk: string, slotKey: string) => {
+    setEditingNoteSlot({ dk, slotKey })
+  }, [])
+
+  const endNoteEdit = useCallback(() => {
+    setEditingNoteSlot(null)
   }, [])
 
   const totalHeight = displaySlots.length * slotHeight
@@ -156,25 +158,16 @@ export function CalendarGrid({ onStrokeComplete, onSaveNote }: CalendarGridProps
                   onTouchEnd={onSlotTouchEnd}
                   onTouchCancel={onSlotTouchCancel}
                   onContextMenu={handleContextMenu}
-                  onNoteClick={handleNoteClick}
+                  editingNoteSlot={editingNoteSlot}
+                  onStartNoteEdit={startNoteEdit}
+                  onEndNoteEdit={endNoteEdit}
+                  onSaveNote={onSaveNote}
                 />
               )
             })}
           </div>
         </div>
       </div>
-      <AnimatePresence>
-        {notePopup && (
-          <NotePopup
-            key={`${notePopup.dk}-${notePopup.slotKey}`}
-            dk={notePopup.dk}
-            slotKey={notePopup.slotKey}
-            position={notePopup.position}
-            onClose={() => setNotePopup(null)}
-            onSaveNote={onSaveNote}
-          />
-        )}
-      </AnimatePresence>
     </div>
   )
 }
