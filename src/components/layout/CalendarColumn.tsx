@@ -10,6 +10,8 @@ interface CalendarColumnProps {
   sync: {
     saveEntries: (dk: string, changes: Record<string, SlotEntry | null>) => Promise<void>
     saveNote: (dk: string, slotKey: string, note: string) => Promise<void>
+    saveSlotTags: (dk: string, baseKeys: string[], tagIds: string[]) => Promise<void>
+    saveTags: () => Promise<void>
   }
 }
 
@@ -49,13 +51,29 @@ export function CalendarColumn({ sync }: CalendarColumnProps) {
     sync.saveNote(dk, slotKey, note)
   }, [sync])
 
+  const onSaveSlotTags = useCallback((dk: string, baseKeys: string[], tagIds: string[]) => {
+    return sync.saveSlotTags(dk, baseKeys, tagIds)
+  }, [sync])
+
+  const onSaveTags = useCallback(() => sync.saveTags(), [sync])
+
   return (
     <div className="h-full bg-surface border-x border-border overflow-hidden">
       <div ref={contentRef} className="h-full">
         {viewMode === 'day' ? (
-          <CalendarGrid onStrokeComplete={onStrokeComplete} onSaveNote={onSaveNote} />
+          <CalendarGrid
+            onStrokeComplete={onStrokeComplete}
+            onSaveNote={onSaveNote}
+            onSaveSlotTags={onSaveSlotTags}
+            onSaveTags={onSaveTags}
+          />
         ) : viewMode === 'week' ? (
-          <WeekGrid onStrokeComplete={onStrokeComplete} onSaveNote={onSaveNote} />
+          <WeekGrid
+            onStrokeComplete={onStrokeComplete}
+            onSaveNote={onSaveNote}
+            onSaveSlotTags={onSaveSlotTags}
+            onSaveTags={onSaveTags}
+          />
         ) : (
           <MonthGrid />
         )}

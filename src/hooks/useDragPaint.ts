@@ -89,7 +89,7 @@ export function useDragPaint(onStrokeComplete?: (dk: string, changes: Record<str
         strokeChanges.current[slotKey] = null
       }
     } else if (dragCategoryId.current) {
-      const entry: SlotEntry = { categoryId: dragCategoryId.current, note: '' }
+      const entry: SlotEntry = { categoryId: dragCategoryId.current, note: '', tagIds: [] }
       setSlot(dk, slotKey, entry)
       strokeChanges.current[slotKey] = entry
     }

@@ -1,9 +1,11 @@
 import { create } from 'zustand'
 import { dateKey } from '../lib/slots'
+import type { TagPickerAnchor } from '../lib/tags'
 
 export interface SlotEntry {
   categoryId: string
   note: string
+  tagIds: string[]
 }
 
 export type SlotData = Record<string, SlotEntry>
@@ -20,6 +22,7 @@ interface CalendarState {
   slotData: Record<string, SlotData>
   undoStack: UndoEntry[]
   focusedSlot: { dateKey: string; slotKey: string } | null
+  tagPicker: { dateKey: string; slotKey: string; anchor: TagPickerAnchor } | null
 
   setCurrentDate: (d: Date, dir?: -1 | 1) => void
   setViewMode: (mode: 'day' | 'week' | 'month') => void
@@ -29,6 +32,8 @@ interface CalendarState {
   setSlot: (dk: string, slotKey: string, entry: SlotEntry | null) => void
   setSlotsBatch: (dk: string, updates: Record<string, SlotEntry | null>) => void
   setNote: (dk: string, slotKey: string, note: string) => void
+  setSlotTags: (dk: string, baseKeys: string[], tagIds: string[]) => void
+  removeTagFromAllSlots: (tagId: string) => void
 
   pushUndo: (entry: UndoEntry) => void
   undo: () => UndoEntry | null
@@ -37,6 +42,8 @@ interface CalendarState {
 
   setFocusedSlot: (slot: { dateKey: string; slotKey: string } | null) => void
   clearFocusedSlot: () => void
+  setTagPicker: (picker: { dateKey: string; slotKey: string; anchor: TagPickerAnchor } | null) => void
+  clearTagPicker: () => void
 }
 
 const MAX_UNDO = 50
@@ -48,6 +55,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   slotData: {},
   undoStack: [],
   focusedSlot: null,
+  tagPicker: null,
 
   setCurrentDate: (d, dir) => set({ currentDate: d, navDirection: dir ?? 0 }),
   setViewMode: (mode) => set({ viewMode: mode }),
@@ -95,6 +103,44 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       return { slotData: { ...state.slotData, [dk]: daySlots } }
     }),
 
+  setSlotTags: (dk, baseKeys, tagIds) =>
+    set((state) => {
+      const daySlots = { ...(state.slotData[dk] || {}) }
+      let changed = false
+      for (const key of baseKeys) {
+        if (daySlots[key]) {
+          daySlots[key] = { ...daySlots[key], tagIds: [...tagIds] }
+          changed = true
+        }
+      }
+      if (!changed) return state
+      return { slotData: { ...state.slotData, [dk]: daySlots } }
+    }),
+
+  removeTagFromAllSlots: (tagId) =>
+    set((state) => {
+      const newSlotData = { ...state.slotData }
+      let anyChanged = false
+      for (const dk of Object.keys(newSlotData)) {
+        const daySlots = newSlotData[dk]
+        let dayChanged = false
+        const newDay = { ...daySlots }
+        for (const [key, entry] of Object.entries(newDay)) {
+          const tagIds = entry.tagIds ?? []
+          if (tagIds.includes(tagId)) {
+            newDay[key] = { ...entry, tagIds: tagIds.filter((id) => id !== tagId) }
+            dayChanged = true
+          }
+        }
+        if (dayChanged) {
+          newSlotData[dk] = newDay
+          anyChanged = true
+        }
+      }
+      if (!anyChanged) return state
+      return { slotData: newSlotData }
+    }),
+
   pushUndo: (entry) =>
     set((state) => ({
       undoStack: [...state.undoStack.slice(-(MAX_UNDO - 1)), entry],
@@ -131,6 +177,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
   setFocusedSlot: (slot) => set({ focusedSlot: slot }),
   clearFocusedSlot: () => set({ focusedSlot: null }),
+  setTagPicker: (picker) => set({ tagPicker: picker }),
+  clearTagPicker: () => set({ tagPicker: null }),
 }))
 
 export const selectDayKey = () => dateKey(useCalendarStore.getState().currentDate)

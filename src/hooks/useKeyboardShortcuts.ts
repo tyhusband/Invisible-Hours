@@ -19,7 +19,7 @@ export function useKeyboardShortcuts() {
       }
 
       const { categories, setActive, toggleEraser, eraserOn, activeCategoryId } = useCategoryStore.getState()
-      const { focusedSlot, clearFocusedSlot, setSlot, slotData, pushUndo } = useCalendarStore.getState()
+      const { focusedSlot, clearFocusedSlot, tagPicker, clearTagPicker, setSlot, slotData, pushUndo } = useCalendarStore.getState()
 
       // Cmd/Ctrl + Z => undo
       if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
@@ -86,8 +86,12 @@ export function useKeyboardShortcuts() {
         return
       }
 
-      // Escape => clear focused slot, or deselect category/eraser
+      // Escape => close tag picker, clear focused slot, or deselect category/eraser
       if (e.key === 'Escape') {
+        if (tagPicker) {
+          clearTagPicker()
+          return
+        }
         if (focusedSlot) {
           const dk = focusedSlot.dateKey
           const daySlots = slotData[dk] || {}

@@ -2,8 +2,13 @@ import { memo, useRef, useCallback, useMemo, useEffect } from 'react'
 import { contrastColor, lighten } from '../../lib/categories'
 import { useCategoryStore } from '../../store/categoryStore'
 import { useCalendarStore } from '../../store/calendarStore'
+import { useTagStore } from '../../store/tagStore'
+import { getUnionTagIds } from '../../lib/tags'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import type { GoogleCalendarSlotInfo } from '../../store/googleCalendarStore'
 import type { DisplaySegment } from '../../lib/slots'
+import { TagChip } from '../tags/TagChip'
+import { PlusIcon } from '../ui/Icons'
 
 const TAP_MAX_MOVEMENT_PX = 14
 
@@ -35,6 +40,8 @@ interface SlotCellProps {
   onStartNoteEdit: (dk: string, slotKey: string) => void
   onEndNoteEdit: () => void
   onSaveNote: (dk: string, slotKey: string, note: string) => void
+  onOpenTagPicker: (dk: string, slotKey: string, button: HTMLElement) => void
+  onRemoveTag: (dk: string, slotKey: string, tagId: string) => void
 }
 
 const GROUP_RADIUS: Record<SlotGroupPosition, string> = {
@@ -81,8 +88,10 @@ function buildSegmentGradient(
 export const SlotCell = memo(function SlotCell({
   dk, slotKey, segments, googleEvent, isWeekView, isDragging, groupPosition, slotHeight,
   onMouseDown, onMouseEnter, onTouchStart, onTouchEnd, onTouchCancel, onContextMenu,
-  editingNoteSlot, onStartNoteEdit, onEndNoteEdit, onSaveNote,
+  editingNoteSlot, onStartNoteEdit, onEndNoteEdit, onSaveNote, onOpenTagPicker, onRemoveTag,
 }: SlotCellProps) {
+  const isMobile = useIsMobile()
+  const tagPickerBtnRef = useRef<HTMLButtonElement>(null)
   const activeCategoryId = useCategoryStore((s) => s.activeCategoryId)
   const eraserOn = useCategoryStore((s) => s.eraserOn)
   const getCategoryColor = useCategoryStore((s) => s.getCategoryColor)
@@ -94,8 +103,20 @@ export const SlotCell = memo(function SlotCell({
   const noteBaseKey = firstFilled?.baseKey
 
   const slotData = useCalendarStore((s) => s.slotData)
+  const tagPicker = useCalendarStore((s) => s.tagPicker)
   const setNote = useCalendarStore((s) => s.setNote)
+  const getTagLabel = useTagStore((s) => s.getTagLabel)
+  const getTagColor = useTagStore((s) => s.getTagColor)
   const note = noteBaseKey ? (slotData[dk]?.[noteBaseKey]?.note ?? '') : ''
+
+  const segmentBaseKeys = useMemo(() => segments.map((s) => s.baseKey), [segments])
+  const tagIds = useMemo(
+    () => getUnionTagIds(slotData[dk] || {}, segmentBaseKeys),
+    [slotData, dk, segmentBaseKeys],
+  )
+
+  const isTagPickerOpen =
+    tagPicker?.dateKey === dk && tagPicker?.slotKey === slotKey
 
   const isEditingNote = !!(
     noteBaseKey &&
@@ -143,6 +164,7 @@ export const SlotCell = memo(function SlotCell({
   const showPlus = !isDragging && !isFilled && !!activeCategoryId && !eraserOn
 
   const showIdleHover = !isDragging && isFilled && !activeCategoryId && !eraserOn
+  const showTagAction = showIdleHover
   const roundedClass = groupPosition ? GROUP_RADIUS[groupPosition] : ''
 
   const idleGradient = useMemo(() => {
@@ -208,7 +230,8 @@ export const SlotCell = memo(function SlotCell({
     return { backgroundColor: color, color: textColor }
   }, [isFilled, gradientBg, color, textColor])
 
-  const labelClass = `${isWeekView ? 'text-[10px]' : 'text-xs'} font-medium relative z-10`
+  const slotTextClass = isWeekView ? 'text-[10px]' : 'text-xs'
+  const labelClass = `${slotTextClass} font-medium relative z-10`
   const showLabel = !groupPosition || groupPosition === 'solo' || groupPosition === 'first'
 
   const handleIdleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -267,6 +290,18 @@ export const SlotCell = memo(function SlotCell({
     }
   }, [isFilled, noteBaseKey, isEditingNote, dk, onStartNoteEdit, detachTouchListeners])
 
+  const handleOpenTagPicker = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    if (tagPickerBtnRef.current) {
+      onOpenTagPicker(dk, slotKey, tagPickerBtnRef.current)
+    }
+  }, [dk, slotKey, onOpenTagPicker])
+
+  const handleRemoveTag = useCallback((tagId: string) => {
+    onRemoveTag(dk, slotKey, tagId)
+  }, [dk, slotKey, onRemoveTag])
+
   return (
     <div
       data-dk={dk}
@@ -317,14 +352,14 @@ export const SlotCell = memo(function SlotCell({
       <div className={`flex-1 h-full relative overflow-hidden ${roundedClass}`}>
         {isFilled ? (
           <div
-            className={`absolute inset-0 flex items-center px-2 transition-[filter,opacity] duration-150 ${roundedClass} ${
+            className={`absolute inset-0 flex items-center justify-between gap-1 px-2 transition-[filter,opacity] duration-150 ${roundedClass} ${
               showCross ? 'group-hover:opacity-60 group-hover:saturate-50' : ''
             }`}
             style={fillStyle}
           >
             {showLabel && (
               isEditingNote ? (
-                <span className={`flex items-center min-w-0 truncate ${labelClass}`}>
+                <span className={`flex items-center min-w-0 flex-1 truncate ${labelClass}`}>
                   <span className="flex-shrink-0">{combinedLabel}</span>
                   <span className="opacity-70 mx-1 flex-shrink-0 font-normal">—</span>
                   <input
@@ -341,7 +376,7 @@ export const SlotCell = memo(function SlotCell({
                   />
                 </span>
               ) : (
-                <span className={`flex items-center min-w-0 truncate ${isWeekView ? 'text-[10px]' : 'text-xs'} relative z-10`}>
+                <span className={`flex items-center min-w-0 flex-1 truncate ${slotTextClass} relative z-10`}>
                   <span className="font-medium flex-shrink-0">{combinedLabel}</span>
                   {note && (
                     <>
@@ -351,6 +386,52 @@ export const SlotCell = memo(function SlotCell({
                   )}
                 </span>
               )
+            )}
+            {!showLabel && <div className="flex-1 min-w-0" />}
+            {(tagIds.length > 0 || showTagAction) && (
+              <div className="flex items-center gap-0.5 flex-shrink-0 relative z-20">
+                {showTagAction && textColor && (
+                  <button
+                    ref={tagPickerBtnRef}
+                    type="button"
+                    onMouseDown={handleOpenTagPicker}
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onTouchEnd={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      handleOpenTagPicker(e)
+                    }}
+                    className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 ${slotTextClass} font-medium leading-none flex-shrink-0 transition-opacity ${
+                      isTagPickerOpen
+                        ? 'opacity-100 ring-2 ring-white/40'
+                        : isMobile
+                          ? 'opacity-70 hover:opacity-100'
+                          : 'opacity-0 group-hover:opacity-70 hover:!opacity-100'
+                    }`}
+                    style={{
+                      color: textColor,
+                      backgroundColor: textColor === '#FFFFFF'
+                        ? 'rgba(0,0,0,0.15)'
+                        : 'rgba(255,255,255,0.3)',
+                    }}
+                    aria-label="Add tags"
+                  >
+                    <PlusIcon size={isWeekView ? 10 : 12} />
+                    {!isWeekView && <span>Tag</span>}
+                  </button>
+                )}
+                {tagIds.map((tagId) => (
+                  <TagChip
+                    key={tagId}
+                    label={getTagLabel(tagId)}
+                    color={getTagColor(tagId)}
+                    size="slot"
+                    textClass={slotTextClass}
+                    removable
+                    onRemove={() => handleRemoveTag(tagId)}
+                  />
+                ))}
+              </div>
             )}
             {showSwap && (
               <div

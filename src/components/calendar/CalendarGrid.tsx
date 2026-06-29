@@ -7,6 +7,8 @@ import { mapEventsToSlots } from '../../lib/googleCalendarSlots'
 import { SlotCell } from './SlotCell'
 import { NowLine } from './NowLine'
 import { useDragPaint } from '../../hooks/useDragPaint'
+import { useSlotTagActions } from '../../hooks/useSlotTagActions'
+import { TagPickerDropdown } from '../tags/TagPickerDropdown'
 import type { SlotEntry } from '../../store/calendarStore'
 import { computeSlotGroupPositions } from '../../lib/slotGroups'
 
@@ -29,14 +31,25 @@ function formatHourLabel(slotKey: string): string {
 interface CalendarGridProps {
   onStrokeComplete: (dk: string, changes: Record<string, SlotEntry | null>) => void
   onSaveNote: (dk: string, slotKey: string, note: string) => void
+  onSaveSlotTags: (dk: string, baseKeys: string[], tagIds: string[]) => Promise<void>
+  onSaveTags: () => Promise<void>
 }
 
-export function CalendarGrid({ onStrokeComplete, onSaveNote }: CalendarGridProps) {
+export function CalendarGrid({ onStrokeComplete, onSaveNote, onSaveSlotTags, onSaveTags }: CalendarGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const currentDate = useCalendarStore((s) => s.currentDate)
   const slotData = useCalendarStore((s) => s.slotData)
   const setFocusedSlot = useCalendarStore((s) => s.setFocusedSlot)
   const granularity = useUIStore((s) => s.slotGranularity)
+
+  const {
+    tagPicker,
+    pickerAssignedTagIds,
+    openTagPicker,
+    clearTagPicker,
+    addTagToSlot,
+    removeTagFromSlot,
+  } = useSlotTagActions({ saveSlotTags: onSaveSlotTags })
 
   const dk = dateKey(currentDate)
   const daySlots = slotData[dk] || {}
@@ -162,12 +175,24 @@ export function CalendarGrid({ onStrokeComplete, onSaveNote }: CalendarGridProps
                   onStartNoteEdit={startNoteEdit}
                   onEndNoteEdit={endNoteEdit}
                   onSaveNote={onSaveNote}
+                  onOpenTagPicker={openTagPicker}
+                  onRemoveTag={removeTagFromSlot}
                 />
               )
             })}
           </div>
         </div>
       </div>
+
+      {tagPicker && (
+        <TagPickerDropdown
+          anchor={tagPicker.anchor}
+          assignedTagIds={pickerAssignedTagIds}
+          onSelect={(tagId) => addTagToSlot(tagPicker.dateKey, tagPicker.slotKey, tagId)}
+          onSaveTags={onSaveTags}
+          onClose={clearTagPicker}
+        />
+      )}
     </div>
   )
 }

@@ -7,6 +7,8 @@ import { useGoogleCalendarStore } from '../../store/googleCalendarStore'
 import { mapEventsToSlots } from '../../lib/googleCalendarSlots'
 import { SlotCell } from './SlotCell'
 import { useDragPaint } from '../../hooks/useDragPaint'
+import { useSlotTagActions } from '../../hooks/useSlotTagActions'
+import { TagPickerDropdown } from '../tags/TagPickerDropdown'
 import type { SlotEntry } from '../../store/calendarStore'
 import { computeSlotGroupPositions } from '../../lib/slotGroups'
 
@@ -30,13 +32,24 @@ function formatHourLabel(slotKey: string): string {
 interface WeekGridProps {
   onStrokeComplete: (dk: string, changes: Record<string, SlotEntry | null>) => void
   onSaveNote: (dk: string, slotKey: string, note: string) => void
+  onSaveSlotTags: (dk: string, baseKeys: string[], tagIds: string[]) => Promise<void>
+  onSaveTags: () => Promise<void>
 }
 
-export function WeekGrid({ onStrokeComplete, onSaveNote }: WeekGridProps) {
+export function WeekGrid({ onStrokeComplete, onSaveNote, onSaveSlotTags, onSaveTags }: WeekGridProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const currentDate = useCalendarStore((s) => s.currentDate)
   const slotData = useCalendarStore((s) => s.slotData)
   const setFocusedSlot = useCalendarStore((s) => s.setFocusedSlot)
+
+  const {
+    tagPicker,
+    pickerAssignedTagIds,
+    openTagPicker,
+    clearTagPicker,
+    addTagToSlot,
+    removeTagFromSlot,
+  } = useSlotTagActions({ saveSlotTags: onSaveSlotTags })
 
   const showWeekends = useUIStore((s) => s.showWeekends)
   const granularity = useUIStore((s) => s.slotGranularity)
@@ -174,6 +187,8 @@ export function WeekGrid({ onStrokeComplete, onSaveNote }: WeekGridProps) {
                   onStartNoteEdit={startNoteEdit}
                   onEndNoteEdit={endNoteEdit}
                   onSaveNote={onSaveNote}
+                  onOpenTagPicker={openTagPicker}
+                  onRemoveTag={removeTagFromSlot}
                 />
               )
             })}
@@ -181,6 +196,15 @@ export function WeekGrid({ onStrokeComplete, onSaveNote }: WeekGridProps) {
         </div>
       </div>
 
+      {tagPicker && (
+        <TagPickerDropdown
+          anchor={tagPicker.anchor}
+          assignedTagIds={pickerAssignedTagIds}
+          onSelect={(tagId) => addTagToSlot(tagPicker.dateKey, tagPicker.slotKey, tagId)}
+          onSaveTags={onSaveTags}
+          onClose={clearTagPicker}
+        />
+      )}
     </div>
   )
 }
@@ -203,12 +227,14 @@ interface WeekDayColumnProps {
   onStartNoteEdit: (dk: string, slotKey: string) => void
   onEndNoteEdit: () => void
   onSaveNote: (dk: string, slotKey: string, note: string) => void
+  onOpenTagPicker: (dk: string, slotKey: string, button: HTMLElement) => void
+  onRemoveTag: (dk: string, slotKey: string, tagId: string) => void
 }
 
 function WeekDayColumn({
   dk, isToday, slotData, isDragging, displaySlots, slotHeight, granularity,
   onSlotMouseDown, onSlotMouseEnter, onSlotTouchStart, onSlotTouchEnd, onSlotTouchCancel,
-  onContextMenu, editingNoteSlot, onStartNoteEdit, onEndNoteEdit, onSaveNote,
+  onContextMenu, editingNoteSlot, onStartNoteEdit, onEndNoteEdit, onSaveNote, onOpenTagPicker, onRemoveTag,
 }: WeekDayColumnProps) {
   const daySlots = slotData[dk] || {}
   const groupPositions = useMemo(
@@ -249,6 +275,8 @@ function WeekDayColumn({
             onStartNoteEdit={onStartNoteEdit}
             onEndNoteEdit={onEndNoteEdit}
             onSaveNote={onSaveNote}
+            onOpenTagPicker={onOpenTagPicker}
+            onRemoveTag={onRemoveTag}
           />
         )
       })}

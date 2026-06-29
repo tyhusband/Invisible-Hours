@@ -4,6 +4,7 @@ import { useGoogleCalendarStore } from '../../store/googleCalendarStore'
 import { CategoryRow } from '../palette/CategoryRow'
 import { MoreAccordion } from '../palette/MoreAccordion'
 import { EraserButton } from '../palette/EraserButton'
+import { TagsButton } from '../palette/TagsButton'
 import { CategoryEditor } from '../palette/CategoryEditor'
 import { PlusIcon, EyeIcon, EyeOffIcon } from '../ui/Icons'
 
@@ -13,6 +14,8 @@ interface PaletteColumnProps {
   sync: {
     saveCategories: () => Promise<void>
     deleteAllEntriesForCategory: (catId: string) => Promise<void>
+    saveTags: () => Promise<void>
+    deleteTagAndAssignments: (tagId: string) => Promise<void>
   }
 }
 
@@ -147,6 +150,7 @@ export function PaletteColumn({ sync }: PaletteColumnProps) {
           <PlusIcon size={18} />
           Add
         </button>
+        <TagsButton sync={sync} />
         <GcalVisibilityToggle />
       </div>
 

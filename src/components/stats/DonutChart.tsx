@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
 
 interface DonutSegment {
-  catId: string
+  id: string
   color: string
   value: number
   fraction: number
@@ -98,7 +98,7 @@ export function DonutChart({ segments, totalMinutes }: DonutChartProps) {
 
             return (
               <motion.circle
-                key={seg.catId}
+                key={seg.id}
                 cx={CENTER}
                 cy={CENTER}
                 r={RADIUS}

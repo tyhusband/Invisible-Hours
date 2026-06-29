@@ -2,9 +2,11 @@ import { useEffect, useCallback, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 import { useCalendarStore, type SlotEntry } from '../store/calendarStore'
 import { useCategoryStore } from '../store/categoryStore'
+import { useTagStore } from '../store/tagStore'
 import { useUIStore } from '../store/uiStore'
 import { dateKey, getWeekDates, getMonthDates } from '../lib/slots'
 import type { Category } from '../lib/categories'
+import type { Tag } from '../lib/tags'
 import type { User } from '@supabase/supabase-js'
 
 const MIGRATION_LS_KEY = 'idt-migrated-15min'
@@ -48,6 +50,26 @@ export function useSupabaseSync(user: User | null) {
     }
   }, [user])
 
+  const loadTags = useCallback(async () => {
+    if (!user) return
+    const { data } = await supabase
+      .from('user_tags')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('sort_order', { ascending: true })
+
+    if (data) {
+      const tags: Tag[] = data.map((r) => ({
+        tagId: r.tag_id,
+        label: r.label,
+        color: r.color,
+        isDeleted: r.is_deleted ?? false,
+        sortOrder: r.sort_order ?? 0,
+      }))
+      useTagStore.getState().setTags(tags)
+    }
+  }, [user])
+
   const loadEntriesForDates = useCallback(async (dates: string[]) => {
     if (!user) return
     const newDates = dates.filter((d) => !loadedDates.current.has(d))
@@ -69,8 +91,25 @@ export function useSupabaseSync(user: User | null) {
         byDate[row.date][row.slot_key] = {
           categoryId: row.category_id,
           note: row.note || '',
+          tagIds: [],
         }
       }
+
+      const { data: tagRows } = await supabase
+        .from('time_entry_tags')
+        .select('date, slot_key, tag_id')
+        .eq('user_id', user.id)
+        .in('date', newDates)
+
+      if (tagRows) {
+        for (const row of tagRows) {
+          const entry = byDate[row.date]?.[row.slot_key]
+          if (entry && !entry.tagIds.includes(row.tag_id)) {
+            entry.tagIds.push(row.tag_id)
+          }
+        }
+      }
+
       useCalendarStore.getState().mergeSlotData(byDate)
       newDates.forEach((d) => loadedDates.current.add(d))
     }
@@ -204,11 +243,12 @@ export function useSupabaseSync(user: User | null) {
       await loadUserSettings()
       await migrateDataTo15Min()
       loadCategories()
+      loadTags()
       loadCurrentView()
       loadAllTimeTotals()
     }
     init()
-  }, [user, loadCategories, loadCurrentView, loadUserSettings, loadAllTimeTotals, migrateDataTo15Min])
+  }, [user, loadCategories, loadTags, loadCurrentView, loadUserSettings, loadAllTimeTotals, migrateDataTo15Min])
 
   // Reload when date/view changes
   useEffect(() => {
@@ -309,6 +349,89 @@ export function useSupabaseSync(user: User | null) {
     saveTimer.current = setTimeout(() => setSaveStatus('idle'), 2000)
   }, [user, setSaveStatus])
 
+  const saveTags = useCallback(async () => {
+    if (!user) return
+    setSaveStatus('saving')
+
+    const { userTags } = useTagStore.getState()
+    const upserts = userTags.map((t) => ({
+      user_id: user.id,
+      tag_id: t.tagId,
+      label: t.label,
+      color: t.color,
+      is_deleted: t.isDeleted,
+      sort_order: t.sortOrder,
+    }))
+
+    if (upserts.length > 0) {
+      await supabase.from('user_tags').upsert(upserts, { onConflict: 'user_id,tag_id' })
+    }
+
+    setSaveStatus('saved')
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => setSaveStatus('idle'), 2000)
+  }, [user, setSaveStatus])
+
+  const saveSlotTags = useCallback(async (dk: string, baseKeys: string[], tagIds: string[]) => {
+    if (!user) return
+    setSaveStatus('saving')
+
+    for (const slotKey of baseKeys) {
+      await supabase
+        .from('time_entry_tags')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('date', dk)
+        .eq('slot_key', slotKey)
+
+      if (tagIds.length > 0) {
+        const rows = tagIds.map((tag_id) => ({
+          user_id: user.id,
+          date: dk,
+          slot_key: slotKey,
+          tag_id,
+        }))
+        await supabase.from('time_entry_tags').insert(rows)
+      }
+    }
+
+    setSaveStatus('saved')
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => setSaveStatus('idle'), 2000)
+  }, [user, setSaveStatus])
+
+  const deleteTagAndAssignments = useCallback(async (tagId: string) => {
+    if (!user) return
+    setSaveStatus('saving')
+
+    useTagStore.getState().deleteTag(tagId)
+    useCalendarStore.getState().removeTagFromAllSlots(tagId)
+
+    await supabase
+      .from('time_entry_tags')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('tag_id', tagId)
+
+    const { userTags } = useTagStore.getState()
+    const upserts = userTags.map((t) => ({
+      user_id: user.id,
+      tag_id: t.tagId,
+      label: t.label,
+      color: t.color,
+      is_deleted: t.isDeleted,
+      sort_order: t.sortOrder,
+    }))
+
+    if (upserts.length > 0) {
+      await supabase.from('user_tags').upsert(upserts, { onConflict: 'user_id,tag_id' })
+    }
+
+    setSaveStatus('saved')
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(() => setSaveStatus('idle'), 2000)
+  }, [user, setSaveStatus])
+
   const mergeCategories = useCallback(async (sourceCatId: string, targetCatId: string) => {
     if (!user) return
     setSaveStatus('saving')
@@ -400,6 +523,9 @@ export function useSupabaseSync(user: User | null) {
     saveEntries,
     saveNote,
     saveCategories,
+    saveTags,
+    saveSlotTags,
+    deleteTagAndAssignments,
     mergeCategories,
     deleteAllEntriesForCategory,
     bulkImportEntries,
